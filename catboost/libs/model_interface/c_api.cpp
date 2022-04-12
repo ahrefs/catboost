@@ -14,11 +14,12 @@
 
 struct TModelHandleContent {
     THolder<TFullModel> FullModel;
+    NCB::NModelEvaluation::TConstModelEvaluatorPtr Evaluator;
 };
 
 #define MODEL_HANDLE_CONTENT_PTR(x) ((TModelHandleContent*)(x))
 #define FULL_MODEL_PTR(x) (MODEL_HANDLE_CONTENT_PTR(x)->FullModel)
-#define EVALUATOR_PTR(x) (MODEL_HANDLE_CONTENT_PTR(x)->FullModel->GetCurrentEvaluator())
+#define EVALUATOR_PTR(x) (MODEL_HANDLE_CONTENT_PTR(x)->Evaluator)
 
 #define DATA_WRAPPER_PTR(x) ((TFeaturesDataWrapper*)(x))
 
@@ -181,8 +182,9 @@ CATBOOST_API DataProviderHandle* BuildDataProvider(DataWrapperHandle* dataWrappe
 
 CATBOOST_API ModelCalcerHandle* ModelCalcerCreate() {
     try {
-        auto* fullModel = new TFullModel;
-        return new TModelHandleContent{.FullModel = THolder(fullModel)};
+      auto *fullModel = new TFullModel;
+      auto evaluator = fullModel->GetCurrentEvaluator();
+      return new TModelHandleContent{.FullModel = THolder(fullModel), .Evaluator = std::move(evaluator)};
     } catch (...) {
         Singleton<TErrorMessageHolder>()->Message = CurrentExceptionMessage();
     }
@@ -203,6 +205,7 @@ CATBOOST_API void ModelCalcerDelete(ModelCalcerHandle* modelHandle) {
 CATBOOST_API bool LoadFullModelFromFile(ModelCalcerHandle* modelHandle, const char* filename) {
     try {
         *FULL_MODEL_PTR(modelHandle) = ReadModel(filename);
+        MODEL_HANDLE_CONTENT_PTR(modelHandle)->Evaluator = std::move(FULL_MODEL_PTR(modelHandle)->ForceReloadEvaluator());
     } catch (...) {
         Singleton<TErrorMessageHolder>()->Message = CurrentExceptionMessage();
         return false;
@@ -214,6 +217,7 @@ CATBOOST_API bool LoadFullModelFromFile(ModelCalcerHandle* modelHandle, const ch
 CATBOOST_API bool LoadFullModelFromBuffer(ModelCalcerHandle* modelHandle, const void* binaryBuffer, size_t binaryBufferSize) {
     try {
         *FULL_MODEL_PTR(modelHandle) = ReadModel(binaryBuffer, binaryBufferSize);
+        MODEL_HANDLE_CONTENT_PTR(modelHandle)->Evaluator = std::move(FULL_MODEL_PTR(modelHandle)->ForceReloadEvaluator());
     } catch (...) {
         Singleton<TErrorMessageHolder>()->Message = CurrentExceptionMessage();
         return false;
@@ -227,6 +231,7 @@ CATBOOST_API bool EnableGPUEvaluation(ModelCalcerHandle* modelHandle, int device
         //TODO(kirillovs): fix this after adding set evaluator props interface
         CB_ENSURE(deviceId == 0, "FIXME: Only device 0 is supported for now");
         FULL_MODEL_PTR(modelHandle)->SetEvaluatorType(EFormulaEvaluatorType::GPU);
+        MODEL_HANDLE_CONTENT_PTR(modelHandle)->Evaluator = std::move(FULL_MODEL_PTR(modelHandle)->GetCurrentEvaluator());
     } catch (...) {
         Singleton<TErrorMessageHolder>()->Message = CurrentExceptionMessage();
         return false;
@@ -237,6 +242,7 @@ CATBOOST_API bool EnableGPUEvaluation(ModelCalcerHandle* modelHandle, int device
 CATBOOST_API bool SetPredictionType(ModelCalcerHandle* modelHandle, EApiPredictionType predictionType) {
     try {
         FULL_MODEL_PTR(modelHandle)->SetPredictionType(static_cast<NCB::NModelEvaluation::EPredictionType>(predictionType));
+        MODEL_HANDLE_CONTENT_PTR(modelHandle)->Evaluator = std::move(FULL_MODEL_PTR(modelHandle)->GetCurrentEvaluator());
     } catch (...) {
         Singleton<TErrorMessageHolder>()->Message = CurrentExceptionMessage();
         return false;
@@ -250,6 +256,7 @@ CATBOOST_API bool SetPredictionTypeString(ModelCalcerHandle* modelHandle, const 
         FULL_MODEL_PTR(modelHandle)->SetPredictionType(
             FromString<NCB::NModelEvaluation::EPredictionType>(predictionTypeStr)
         );
+        MODEL_HANDLE_CONTENT_PTR(modelHandle)->Evaluator = std::move(FULL_MODEL_PTR(modelHandle)->GetCurrentEvaluator());
     } catch (...) {
         Singleton<TErrorMessageHolder>()->Message = CurrentExceptionMessage();
         return false;
@@ -261,13 +268,13 @@ CATBOOST_API bool SetPredictionTypeString(ModelCalcerHandle* modelHandle, const 
 CATBOOST_API bool CalcModelPredictionFlat(ModelCalcerHandle* modelHandle, size_t docCount, const float** floatFeatures, size_t floatFeaturesSize, double* result, size_t resultSize) {
     try {
         if (docCount == 1) {
-            FULL_MODEL_PTR(modelHandle)->CalcFlatSingle(TConstArrayRef<float>(*floatFeatures, floatFeaturesSize), TArrayRef<double>(result, resultSize));
+            EVALUATOR_PTR(modelHandle)->CalcFlatSingle(TConstArrayRef<float>(*floatFeatures, floatFeaturesSize), TArrayRef<double>(result, resultSize));
         } else {
             TVector<TConstArrayRef<float>> featuresVec(docCount);
             for (size_t i = 0; i < docCount; ++i) {
                 featuresVec[i] = TConstArrayRef<float>(floatFeatures[i], floatFeaturesSize);
             }
-            FULL_MODEL_PTR(modelHandle)->CalcFlat(featuresVec, TArrayRef<double>(result, resultSize));
+            EVALUATOR_PTR(modelHandle)->CalcFlat(featuresVec, TArrayRef<double>(result, resultSize));
         }
     } catch (...) {
         Singleton<TErrorMessageHolder>()->Message = CurrentExceptionMessage();

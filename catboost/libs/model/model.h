@@ -670,6 +670,13 @@ public:
         }
     }
 
+    NCB::NModelEvaluation::TConstModelEvaluatorPtr ForceReloadEvaluator() const {
+        with_lock(CurrentEvaluatorLock) {
+            Evaluator = NCB::NModelEvaluation::CreateEvaluator(FormulaEvaluatorType, *this);
+            return Evaluator;
+        }
+    }
+
     void SetPredictionType(NCB::NModelEvaluation::EPredictionType predictionType) const {
         with_lock(CurrentEvaluatorLock) {
             if (!Evaluator) {
